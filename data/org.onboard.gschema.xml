@@ -165,6 +165,12 @@ delayed-stroke: generate key-press and key-release on button-release, there is n
             <summary>Touch feedback enabled</summary>
             <description>Show extra labels above currently pressed keys.</description>
         </key>
+      <!--  <key name="scan-feedback-enabled" type="b">
+            <default>false</default>
+            <summary>Scan feedback enabled</summary>
+            <description>Show extra labels above currently pressed keys.</description>
+        </key>
+       --> 
         <key name="touch-feedback-size" type="i">
             <default>0</default>
             <summary>Touch-feedback size</summary>
@@ -600,6 +606,58 @@ Example: [["LALT", "TAB"], ["LALT", "SHIFT", "TAB"], ["CTRL", "ALT", "F[0-9]+"]]
             <summary>Flash keys</summary>
             <description>Keys should flash when activated.</description>
         </key>
+        <key name="scan-feedback-enabled" type="b">
+            <default>false</default>
+            <summary>Scan feedback enabled</summary>
+            <description>Show extra labels above currently pressed keys.</description>
+        </key>
+        <key name="activation-flash-interval" type="d">
+            <default>0.1</default>
+            <summary>Activation Flash Interval</summary>
+            <description>Time between key activation flashes (in sec)</description>
+        </key>
+        <key name="activation-flash-count" type="i">
+            <default>2</default>
+            <summary>Activation Flash Count</summary>
+            <description>Number of key activation flashes.</description>
+        </key>
+        <key name="scanner-popup-unpress-delay" type="i">
+            <default>2</default>
+            <summary>Scanner Key Popup Delay</summary>
+            <description>Time to display Key Popup on screen(in sec)</description>
+        </key>
+        <!-- Inputability -->
+        <key name="scan-popup-size-change-enabled" type="b">
+            <default>false</default>
+            <summary>popup size change enable</summary>
+            <description>Show height and width spin button.</description>
+        </key>
+        <key name="scan-popup-height" type="i">
+            <default>10</default>
+            <summary>Scanner Key Popup Height</summary>
+            <description>set height for popup</description>
+        </key>
+        <key name="scan-popup-width" type="i">
+            <default>10</default>
+            <summary>Scanner Key Popup Width</summary>
+            <description>Set width for popup</description>
+        </key>
+        <key name="key-type" type="s">
+            <default>"single_key"</default>
+            <summary>Key Selection Type (single/multiple)</summary>
+            <description>Number of keys mapped to scan actions for 2-switches scanning.</description>
+        </key>
+        <key name="color-type" type="s">
+            <default>"theme_color"</default>
+            <summary>Key Color Type (theme/custom)</summary>
+            <description>Color mapped to scan actions for 2-switches scanning.</description>
+        </key>
+        <key name="scan-color" type="ad">
+            <default>[0.45, 0.45, 0.7, 1.0]</default>
+            <summary>Scan Color</summary>
+            <description>Color to be set for feedback while scanning.</description>
+        </key>
+        <!-- Inputability -->
     </schema>
 
     <enum id="org.onboard.typing-assistance.spell-check.Backend">
