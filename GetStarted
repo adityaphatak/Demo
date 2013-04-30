@@ -1,0 +1,28 @@
+Support for Fedora 17 and Fedora 18 
+Preferable Fedora 18 and python 3 since few features like popup not supported on python 2
+Support for Ubuntu coming soon
+
+---------------------------------------------------------------------------------------------------------------------------
+
+# Running with Python 3 (default)
+
+su -c "yum groupinstall development-libs development-tools gnome-software-development x-software-development"
+
+su -c "yum install python3-setuptools"
+bzr branch lp:python-distutils-extra
+cd python-distutils-extra
+python3 setup.py build
+su -c "python3 setup.py install"
+cd ..
+
+su -c "yum install python3-devel dconf-devel python3-gobject python3-cairo python3-dbus bzr"
+git clone "https://github.com/adityaphatak/Inputability.git"
+cd Inputability
+python3 setup.py build
+su -c "python3 setup.py install"
+
+su -c "glib-compile-schemas /usr/share/glib-2.0/schemas"
+
+cd virtkey
+python3 setup.py build
+su -c "python3 setup.py install"
