@@ -385,11 +385,16 @@ class ScanMode(Timer):
     ACTION_STEP_STOP  = 7
     ACTION_UNHANDLED  = 8
 
+    """ Handles Key Events (Multiple Press at a time) """#In
+    MUL_KEY = 0#In
+    SCAN_PREV_ACTION = ACTION_UNHANDLED#In
+    SCAN_ACTION_DO = True#In
+
     """ Time between key activation flashes (in sec) """
     ACTIVATION_FLASH_INTERVAL = 0.1
 
     """ Number of key activation flashes """
-    ACTIVATION_FLASH_COUNT = 4
+    ACTIVATION_FLASH_COUNT = 2
 
     def __init__(self, redraw_callback, activate_callback):
         super(ScanMode, self).__init__()
@@ -401,6 +406,9 @@ class ScanMode(Timer):
 
         """ Counter for key flash animation """
         self._flash = 0
+    
+        """ Counter for key popup animation """
+        self._popup_display=0 #In
 
         """ Callback for key redraws """
         self._redraw_callback = redraw_callback
@@ -410,7 +418,13 @@ class ScanMode(Timer):
 
         """ A Chunker instance """
         self.chunker = None
-
+        
+        """ Time between key activation flashes (in sec) """
+        self.ACTIVATION_FLASH_INTERVAL = config.scanner.activation_flash_interval #0.1 #In
+        
+        """ Number of key activation flashes """
+        self.ACTIVATION_FLASH_COUNT = config.scanner.activation_flash_count  #2 #In
+        
     def __del__(self):
         logger.debug("ScanMode.__del__()")
 
@@ -462,12 +476,37 @@ class ScanMode(Timer):
             action = self.map_actions(button_map, event.button, False)
 
         elif event_type == XIEventType.KeyPress:
-            key_map = config.scanner.device_key_map
-            action = self.map_actions(key_map, event.keyval, True)
+            if self.MUL_KEY >= 0:#In
+                key_map = config.scanner.device_key_map#In
+                self.SCAN_PREV_ACTION = self.map_actions(key_map, event.keyval, True)#In
+                
+                self.MUL_KEY = self.MUL_KEY + 1#In
+                return#In
+            else:
+                action = self.map_actions(key_map, event.keyval, False)
 
         elif event_type == XIEventType.KeyRelease:
-            key_map = config.scanner.device_key_map
-            action = self.map_actions(key_map, event.keyval, False)
+            if self.MUL_KEY > 0:#In
+                self.MUL_KEY = self.MUL_KEY - 1#In
+                
+                key_map = config.scanner.device_key_map
+                action = self.map_actions(key_map, event.keyval, True)#In
+                
+                if action != self.SCAN_PREV_ACTION:#In
+                    self.SCAN_ACTION_DO = False#In
+                    
+                if self.MUL_KEY > 0 or (self.MUL_KEY == 0 and self.SCAN_ACTION_DO != True):#In
+                    action = self.map_actions(key_map, event.keyval, False)
+
+                    if self.MUL_KEY == 0 and self.SCAN_ACTION_DO != True:#In
+                        """
+                        print("E R R O R : PLEASE DONT PRESS BOTH FUNCTIONALITIES TOGETHER!!!")#In
+
+                        TODO : Show Error Message
+                        """
+                        self.SCAN_ACTION_DO = True#In
+            else:
+                action = self.map_actions(key_map, event.keyval, False)
 
         else:
             action = self.ACTION_UNHANDLED
@@ -509,7 +548,14 @@ class ScanMode(Timer):
             self._activate_callback(key)
             self.init_position()
             return False
-
+            
+    def _on_activation_timer_popup(self, key):#In
+        """
+        Timer callback: Reset Scanner.
+        """
+        self.init_position()
+        return False
+    
     def activate(self):
         """
         Activates a key and triggers feedback.
@@ -519,13 +565,21 @@ class ScanMode(Timer):
             return
 
         if config.scanner.feedback_flash:
-            self._flash = self.ACTIVATION_FLASH_COUNT
+            """ Scanner Blinking """
+            self._flash = self.ACTIVATION_FLASH_COUNT * 2 #In
             self._activation_timer.start(self.ACTIVATION_FLASH_INTERVAL,
                                          self._on_activation_timer,
                                          key)
-        else:
+        else:#In
+            """ Scanner Popup """
+            delay = config.UNPRESS_DELAY #In
+            config.UNPRESS_DELAY = config.scanner.scanner_popup_unpress_delay #In
             self._activate_callback(key)
-            self.init_position()
+            self._activation_timer.start(config.scanner.scanner_popup_unpress_delay,
+                                         self._on_activation_timer_popup,
+                                         key) #In
+            config.UNPRESS_DELAY = delay #In
+            #self.init_position()
 
     def reset(self):
         """
@@ -737,6 +791,7 @@ class StepScan(ScanMode):
                 self.redraw(self.chunker.highlight(True))
             else:
                 self.activate()
+                self.SCAN_PREV_ACTION = self.ACTION_UNHANDLED#2_2
 
 
 class DirectScan(ScanMode):
@@ -842,7 +897,7 @@ class Scanner(object):
 
         return profiles[mode](redraw_callback, activate_callback)
 
-    def update_layer(self, layout, layer, force_update = False):
+    def update_layer(self, layout, layer):
         """
         Notify the scanner about layer or layout changes.
         """
@@ -856,7 +911,7 @@ class Scanner(object):
             self.layer = layer
             changed = True
 
-        if changed or force_update:
+        if changed:
             self.mode.set_layer(self.layout, self.layer)
 
     def finalize(self):
