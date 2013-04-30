@@ -8,7 +8,7 @@ import os
 import sys
 import copy
 import shutil
-from subprocess import Popen
+import subprocess
 from xml.parsers.expat import ExpatError
 from xml.dom import minidom
 import gettext
@@ -102,6 +102,49 @@ class DialogBuilder(object):
         if callback:
             callback(value)
 
+    # color button
+    
+    def bind_color(self, name, config_object, key):
+        w = self.wid(name)
+        
+        color_rgba = getattr(config_object, key)
+        
+        color = Gdk.RGBA()
+        color.red = color_rgba[0]
+        color.green = color_rgba[1]
+        color.blue = color_rgba[2]
+        color.alpha = color_rgba[3]
+        
+        w.set_rgba(color)
+        
+        w.connect("color-set", self.bind_color_callback, config_object, key)
+        getattr(config_object, key + '_notify_add')(lambda x: w.set_rgba(Gdk.RGBA()))
+
+    def bind_color_callback(self, widget, config_object, key):
+        color = Gdk.RGBA()
+        widget.get_rgba(color)
+        
+        color_rgba = []
+        color_rgba.append(color.red)
+        color_rgba.append(color.green)
+        color_rgba.append(color.blue)
+        color_rgba.append(color.alpha)
+        
+        setattr(config_object, key, color_rgba)
+    
+    # radio button
+    def bind_radio(self, name, config_object, key, widget_callback = None):
+        w = self.wid(name)
+        w.set_active(name == getattr(config_object, key))
+        w.connect("toggled", self.bind_radio_callback, config_object, key, widget_callback, name)
+        getattr(config_object, key + '_notify_add')(lambda x: widget_callback)
+
+    def bind_radio_callback(self, widget, config_object, key, callback, value = None):
+        if widget.get_active():
+            setattr(config_object, key, value)
+        if callback:
+            callback(widget, value, config_object, key)
+            
     # checkbox
     def bind_check(self, name, config_object, key, widget_callback = None):
         w = self.wid(name)
@@ -323,10 +366,24 @@ class Settings(DialogBuilder):
         self.user_layout_root = os.path.join(config.user_dir, "layouts/")
         if not os.path.exists(self.user_layout_root):
             os.makedirs(self.user_layout_root)
-
+            
+        # Inpitability layout view -first page          
+        self.layout_view1 = builder.get_object("layout_view1")
+        self.layout_view1.append_column( \
+                Gtk.TreeViewColumn(None, Gtk.CellRendererText(), markup=0))  
+                
+        self.user_layout_root1 = os.path.join(config.user_dir, "inputability/")
+        if not os.path.exists(self.user_layout_root1):
+            os.makedirs(self.user_layout_root1)        
+     
+                                                         
         self.layout_remove_button = \
                              builder.get_object("layout_remove_button")
-
+     
+        #Inputability Remove Button
+        self.layout_remove_button1 = \
+                             builder.get_object("layout_remove_button1")    
+     
         self.update_layoutList()
         self.update_layout_widgets()
 
@@ -358,7 +415,54 @@ class Settings(DialogBuilder):
         # Snippets
         self.snippet_view = SnippetView()
         builder.get_object("snippet_scrolled_window").add(self.snippet_view)
+        
+        # Inputability - seconde page
+        
+        self.bind_spin("activation_flash_interval_spinbutton",
+                            config.scanner, "activation_flash_interval") #In
+        self.bind_spin("activation_flash_count_spinbutton",
+                            config.scanner, "activation_flash_count")    #In                
+        
+        # If scan popup enable then enable delay spin-button
+        
+        self.wid("scan_feedback_enabled_toggle") \
+                .connect_after("toggled", lambda x:self.popup_delay_update_ui())#In
+        self.bind_check("scan_feedback_enabled_toggle",
+                        config.scanner, "scan_feedback_enabled")#In
+                                 
+        self.bind_spin("scanner_unpress_delay_spinbutton",
+                            config.scanner, "scanner_popup_unpress_delay") #In 
+        self.popup_delay_update_ui()                            
+        
+        # If change-popup-size checkbox enable then enable height and width spin-button
+        
+        self.wid("size_change_enabled_toggle") \
+                .connect_after("toggled", lambda x:self.size_change_update_ui())#In
+        
+        self.bind_check("size_change_enabled_toggle",
+                        config.scanner, "scan_popup_size_change_enabled")
+        self.bind_spin("scan_popup_height_spinbutton",
+                            config.scanner, "scan_popup_height")          #In  
+        self.bind_spin("scan_popup_width_spinbutton",
+                            config.scanner, "scan_popup_width")           #In         
+        
+        self.size_change_update_ui()
+        
+        # Color type
 
+        def on_color_type_toggle(radio, data, config_object, key):
+            if radio.get_active():
+                self.scan_color_update_ui()
+        	        	
+        self.bind_radio("theme_color", config.scanner, "color_type", widget_callback = on_color_type_toggle)
+        self.bind_radio("custom_color", config.scanner, "color_type", widget_callback = on_color_type_toggle)
+        
+        self.bind_color("scan_colorbutton", config.scanner, "scan_color")
+        
+        self.scan_color_update_ui()
+        
+        # Inputability-End
+        
         # Universal Access
         scanner_enabled = builder.get_object("scanner_enabled")
         scanner_enabled.set_active(config.scanner.enabled)
@@ -389,6 +493,7 @@ class Settings(DialogBuilder):
                             config.mousetweaks, "dwell_time")
             self.bind_spin("hover_click_motion_threshold_spinbutton",
                             config.mousetweaks, "dwell_threshold")
+                           
 
         # select last active page
         page = config.current_settings_page
@@ -413,7 +518,20 @@ class Settings(DialogBuilder):
 
         _logger.info("Entering mainloop of Onboard-settings")
         Gtk.main()
-
+    
+    #To Enable or disable color_button grid-box
+    def scan_color_update_ui(self): #In
+        self.wid("scan_colorbutton").set_sensitive(not (config.scanner.color_type == "theme_color"))
+    
+    #To Enable or disable height and widht grid-box    
+    def size_change_update_ui(self): #In
+        self.wid("scan_popup_size_grid"). \
+                    set_sensitive(config.scanner.scan_popup_size_change_enabled)
+    #To Enable or disable popup delay grid-box    
+    def popup_delay_update_ui(self): #In
+        self.wid("scan_popup_delay_grid"). \
+                    set_sensitive(config.scanner.scan_feedback_enabled)        
+    
     def on_pages_view_cursor_changed(self, widget):
         sel = widget.get_selection()
         if sel:
@@ -482,7 +600,7 @@ class Settings(DialogBuilder):
 
     def update_window_widgets(self):
         force_to_top =  config.is_force_to_top()
-
+        
         self.icon_palette_toggle.set_sensitive( \
                              not config.is_icon_palette_last_unhide_option())
         active = config.is_icon_palette_in_use()
@@ -528,7 +646,7 @@ class Settings(DialogBuilder):
 
     def on_background_transparency_spinbutton_changed(self, widget):
         config.window.background_transparency = widget.get_value()
-
+        
     def on_enable_inactive_transparency_toggled(self, widget):
         if not config.scanner.enabled:
             config.window.enable_inactive_transparency = widget.get_active()
@@ -539,16 +657,31 @@ class Settings(DialogBuilder):
     def on_inactive_transparency_delay_changed(self, widget):
         config.window.inactive_transparency_delay = widget.get_value()
 
-    def open_user_layout_dir(self):
-        if os.path.exists('/usr/bin/nautilus'):
-            os.system(("nautilus --no-desktop %s" %self.user_layout_root))
-        elif os.path.exists('/usr/bin/thunar'):
-            os.system(("thunar %s" %self.user_layout_root))
-        else:
-            _logger.warning(_("No file manager to open layout folder"))
+    def open_user_layout_dir(self,layoutname):
+     
+         if layoutname =="layout_view":
+            if os.path.exists('/usr/bin/nautilus'):
+                os.system(("nautilus --no-desktop %s" %self.user_layout_root))
+            elif os.path.exists('/usr/bin/thunar'):
+                os.system(("thunar %s" %self.user_layout_root))
+            else:
+                _logger.warning(_("No file manager to open layout folder"))
+        
+         else: #For .inputability layout folder  
+           
+            if os.path.exists('/usr/bin/nautilus'):
+                os.system(("nautilus --no-desktop %s" %self.user_layout_root1))
+            elif os.path.exists('/usr/bin/thunar'):
+                os.system(("thunar %s" %self.user_layout_root1))
+            else:
+                _logger.warning(_("No file manager to open layout folder")) 
 
     def on_layout_folder_button_clicked(self, widget):
-        self.open_user_layout_dir()
+        self.open_user_layout_dir(layoutname="layout_view") 
+    
+    def on_layout_folder_button_clicked1(self, widget): #For inputability layout folder event 
+           self.open_user_layout_dir(layoutname="layout_view1")                   
+                        
 
     def on_personalise_button_clicked(self, widget):
         new_layout_name = show_ask_string_dialog(
@@ -558,7 +691,17 @@ class Settings(DialogBuilder):
                            config.LAYOUT_FILE_EXTENSION
             LayoutLoaderSVG.copy_layout(config.layout_filename, new_filename)
             self.update_layoutList()
-            self.open_user_layout_dir()
+            self.open_user_layout_dir(layoutname="layout_view")        
+            
+    def on_personalise_button_clicked1(self, widget): #Inputability Personalise button
+        new_layout_name = show_ask_string_dialog(
+            _("Enter name for personalised layout"), self.window)
+        if new_layout_name:
+            new_filename = os.path.join(self.user_layout_root1, new_layout_name) + \
+                           config.LAYOUT_FILE_EXTENSION
+            LayoutLoaderSVG.copy_layout(config.layout_filename, new_filename)
+            self.update_layoutList()
+            self.open_user_layout_dir(layoutname="layout_view1")        
 
     def on_scanner_enabled_toggled(self, widget):
         config.scanner.enabled = widget.get_active()
@@ -621,12 +764,28 @@ class Settings(DialogBuilder):
         Gtk.main_quit()
 
     def update_layoutList(self):
+    
         self.layoutList = Gtk.ListStore(str, str)
+        self.layoutList1 = Gtk.ListStore(str, str)
         self.layout_view.set_model(self.layoutList)
-
+        self.layout_view1.set_model(self.layoutList1)
+        
         self.update_layouts(os.path.join(config.install_dir, "layouts"))
         self.update_layouts(self.user_layout_root)
+        
+        self.update_layouts(os.path.join(config.install_dir, "layouts/inputability"))
+        self.update_layouts(self.user_layout_root1)    
+   
+    #Calling Orca
+    def on_acitvate_orca_clicked(self, event):
+     
 
+       subprocess.Popen("orca")   
+       self.window.destroy()
+       Gtk.main_quit()
+    
+
+ 
     def cb_selected_layout_changed(self):
         self.update_layouts(self.user_layout_root)
 
@@ -646,42 +805,71 @@ class Settings(DialogBuilder):
 
         filterer = Gtk.FileFilter()
         filterer.add_pattern("*")
-        filterer.set_name(_("All files"))
+        filterer.set_name(_("All files"))  
         chooser.add_filter(filterer)
 
         response = chooser.run()
+                
         if response == Gtk.ResponseType.OK:
             filename = chooser.get_filename()
 
             f = open_utf8(filename)
             sokdoc = minidom.parse(f).documentElement
             for p in sokdoc.getElementsByTagName("pane"):
-                fn = p.attributes['filename'].value
-
-                shutil.copyfile("%s/%s" % (os.path.dirname(filename), fn),
+             # To check which add button was click( Onboard layout Add or inputabiltiy layout Add)
+                if event.get_label()== "gtk-add": 
+                    
+                    fn = p.attributes['filename'].value
+                                
+                    shutil.copyfile("%s/%s" % (os.path.dirname(filename), fn),
                                 "%s%s" % (self.user_layout_root, fn))
-
-            shutil.copyfile(filename,"%s%s" % (self.user_layout_root,
+                else:
+                    
+                     fn = p.attributes['filename'].value
+                                
+                     shutil.copyfile("%s/%s" % (os.path.dirname(filename), fn),
+                                "%s%s" % (self.user_layout_root1, fn))
+                                
+                       
+            if event.get_label()== "gtk-add":                                                             
+                
+                shutil.copyfile(filename,"%s%s" % (self.user_layout_root,
                                                os.path.basename(filename)))
-
+            else:
+                shutil.copyfile(filename,"%s%s" % (self.user_layout_root1,
+                                             os.path.basename(filename)))      
+              
             self.update_layoutList()
         chooser.destroy()
 
+
     def on_layout_remove_button_clicked(self, event):
-        sel = self.layout_view.get_selection()
-        if sel:
-            filename = self.layoutList.get_value(sel.get_selected()[1], 1)
+    
+        if  event.get_label()== "gtk-remove": 
+            sel = self.layout_view.get_selection()
+            if sel:
+                filename = self.layoutList.get_value(sel.get_selected()[1], 1)
 
-            LayoutLoaderSVG.remove_layout(filename)
+                LayoutLoaderSVG.remove_layout(filename)
 
-            config.layout_filename = self.layoutList[0][1] \
+                config.layout_filename = self.layoutList[0][1] \
                                      if len(self.layoutList) else ""
-        self.update_layoutList()
+        else: # For inputability Layout remove
+            sel = self.layout_view1.get_selection()
+            if sel:
+                filename = self.layoutList1.get_value(sel.get_selected()[1], 1)
 
+                LayoutLoaderSVG.remove_layout(filename)
+
+                config.layout_filename = self.layoutList1[0][1] \
+                                     if len(self.layoutList1) else ""
+                                                 
+        self.update_layoutList()
+        
     def update_layouts(self, path):
 
         filenames = self.find_layouts(path)
-
+         
         layouts = []
         for filename in filenames:
             file_object = open_utf8(filename)
@@ -706,17 +894,33 @@ class Settings(DialogBuilder):
             file_object.close()
 
         for key, value, filename in sorted(layouts):
-            it = self.layoutList.append((value, filename))
+                       
+            if path.find("inputability") == -1: 
+                
+                it = self.layoutList.append((value, filename))
+            else:
+               
+                it = self.layoutList1.append((value, filename))           
+            
             if filename == config.layout_filename:
-                sel = self.layout_view.get_selection()
-                if sel:
-                    sel.select_iter(it)
+                if path.find("inputability")== -1:
+                    sel = self.layout_view.get_selection()
+                    if sel:
+                        sel.select_iter(it)
+                else:
+                    sel1 = self.layout_view1.get_selection()
+                    if sel1:
+                        sel1.select_iter(it) 
 
     def update_layout_widgets(self):
-        filename = self.get_selected_layout_filename()
+        filename = self.get_selected_layout_filename(layoutname="layout_view")
         self.layout_remove_button.set_sensitive(not filename is None and \
                                          os.access(filename, os.W_OK))
+        filename1 = self.get_selected_layout_filename(layoutname="layout_view1")                                 
+        self.layout_remove_button1.set_sensitive(not filename1 is None and \
+                                  os.access(filename1, os.W_OK))                                            
 
+ 
     def find_layouts(self, path):
         files = os.listdir(path)
         layouts = []
@@ -727,18 +931,38 @@ class Settings(DialogBuilder):
         return layouts
 
     def on_layout_view_cursor_changed(self, widget):
-        filename = self.get_selected_layout_filename()
+      
+      if widget is self.layout_view :
+              
+        filename = self.get_selected_layout_filename(layoutname="layout_view")
         if filename:
             config.layout_filename = filename
-        self.update_layout_widgets()
+      else : # For Inputability Layout_view1
+      
+        filename = self.get_selected_layout_filename(layoutname="layout_view1")
+        if filename:
+            config.layout_filename = filename
+                  
+      self.update_layout_widgets()
+      
 
-    def get_selected_layout_filename(self):
-        sel = self.layout_view.get_selection()
-        if sel:
-            it = sel.get_selected()[1]
-            if it:
-                return self.layoutList.get_value(it,1)
+    def get_selected_layout_filename(self,layoutname):
+        if layoutname == "layout_view":
+            sel = self.layout_view.get_selection()
+        
+            if sel:
+                it = sel.get_selected()[1]
+                if it:
+                    return self.layoutList.get_value(it,1)
+        else: #For inputabiblity layout files
+            sel = self.layout_view1.get_selection()
+        
+            if sel:
+                it = sel.get_selected()[1]
+                if it:
+                    return self.layoutList1.get_value(it,1)
         return None
+        
 
     def on_new_theme_button_clicked(self, widget):
         while True:
@@ -1385,6 +1609,11 @@ class ScannerDialog(DialogBuilder):
                            ScanMode.ACTION_DOWN,
                            ScanMode.ACTION_ACTIVATE] ]
 
+    """ """
+    keyvalues_LHalf = [Gdk.KEY_F1, Gdk.KEY_F2, Gdk.KEY_F3, Gdk.KEY_F4, Gdk.KEY_F5, Gdk.KEY_F6, Gdk.KEY_F7, Gdk.KEY_F8, Gdk.KEY_grave, Gdk.KEY_1, Gdk.KEY_2, Gdk.KEY_3, Gdk.KEY_4, Gdk.KEY_5, Gdk.KEY_6, Gdk.KEY_7, Gdk.KEY_8,  Gdk.KEY_9, Gdk.KEY_Tab, Gdk.KEY_q, Gdk.KEY_w, Gdk.KEY_e, Gdk.KEY_r, Gdk.KEY_t, Gdk.KEY_y, Gdk.KEY_u, Gdk.KEY_i, Gdk.KEY_o, Gdk.KEY_Caps_Lock, Gdk.KEY_a, Gdk.KEY_s, Gdk.KEY_d, Gdk.KEY_f, Gdk.KEY_g, Gdk.KEY_h, Gdk.KEY_j, Gdk.KEY_k, Gdk.KEY_l, Gdk.KEY_Shift_L, Gdk.KEY_z, Gdk.KEY_x, Gdk.KEY_c, Gdk.KEY_v, Gdk.KEY_b, Gdk.KEY_n, Gdk.KEY_m, Gdk.KEY_comma, Gdk.KEY_Control_L, Gdk.KEY_Super_L, Gdk.KEY_Alt_L, Gdk.KEY_space]
+    
+    keyvalues_RHalf = [Gdk.KEY_F9, Gdk.KEY_F10, Gdk.KEY_F11, Gdk.KEY_F12, Gdk.KEY_minus, Gdk.KEY_equal, Gdk.KEY_BackSpace, Gdk.KEY_Print, Gdk.KEY_Scroll_Lock, Gdk.KEY_Pause, Gdk.KEY_Num_Lock, Gdk.KEY_KP_Divide, Gdk.KEY_KP_Multiply, Gdk.KEY_KP_Subtract, Gdk.KEY_bracketleft, Gdk.KEY_bracketright, Gdk.KEY_backslash, Gdk.KEY_Insert, Gdk.KEY_Home, Gdk.KEY_Page_Up, Gdk.KEY_KP_7, Gdk.KEY_KP_8, Gdk.KEY_KP_9, Gdk.KEY_apostrophe, Gdk.KEY_Return, Gdk.KEY_Delete, Gdk.KEY_End, Gdk.KEY_Page_Down, Gdk.KEY_KP_4, Gdk.KEY_KP_5, Gdk.KEY_KP_6, Gdk.KEY_KP_Add, Gdk.KEY_slash, Gdk.KEY_Shift_R, Gdk.KEY_Up, Gdk.KEY_KP_1, Gdk.KEY_KP_2, Gdk.KEY_KP_3, Gdk.KEY_Super_R, Gdk.KEY_Menu, Gdk.KEY_Control_R, Gdk.KEY_Left, Gdk.KEY_Down, Gdk.KEY_Right, Gdk.KEY_KP_0, Gdk.KEY_KP_Decimal, Gdk.KEY_KP_Enter]
+
     def __init__(self):
 
         builder = LoadUI("settings_scanner_dialog")
@@ -1412,6 +1641,30 @@ class ScannerDialog(DialogBuilder):
         self.bind_check("alternate", scanner, "alternate")
         self.bind_check("device_detach", scanner, "device_detach")
 
+        """	#In: radio button	"""
+        def on_key_type_toggle(radio, data, config_object, key):
+            if radio.get_active():
+                self._update_2_scan_ui()
+                
+                self.on_mapping_cleared(None, "clear", self.pointer_selected)
+                
+                if data == "multiple_key":
+                    for action in self.supported_actions[config.scanner.mode]:
+                        if action == ScanMode.ACTION_STEP:#In
+                            for keyval in self.keyvalues_LHalf:#In
+                                config.scanner.device_key_map[keyval] = action#In
+                        else:
+                            for keyval in self.keyvalues_RHalf:#In
+                                config.scanner.device_key_map[keyval] = action#In
+                
+                    self.on_mapping_edited(None, "multiple", Gdk.KEY_Escape, self.pointer_selected)
+        	        	
+        self.bind_radio("single_key", config.scanner, "key_type", widget_callback = on_key_type_toggle)
+        self.bind_radio("multiple_key", config.scanner, "key_type", widget_callback = on_key_type_toggle)
+        
+        self._update_2_scan_ui()
+        """	#In: radio button	"""
+        
     def __del__(self):
         _logger.debug("ScannerDialog.__del__()")
 
@@ -1437,6 +1690,16 @@ class ScannerDialog(DialogBuilder):
     def _scan_mode_notify(self, mode):
         self.wid("scan_mode_combo").set_active(mode)
         self.wid("scan_mode_notebook").set_current_page(mode)
+        
+        """ In: radio button """
+        if mode == 2 and self.wid("device_detach").get_sensitive() == True:#stepscan
+            config.scanner.key_type = "single_key"
+            self.wid(config.scanner.key_type).set_active(True)
+            self.wid("key_type_grid").show()
+            """The below line exists here to resest when mode is changed; and not when @ regular start-up once you had set i.e. in case of same if-else in above function"""
+        else:
+            self.wid("key_type_grid").hide()
+        
         self.update_device_mapping()
 
     def init_input_devices(self):
@@ -1476,6 +1739,8 @@ class ScannerDialog(DialogBuilder):
         if it is None:
             return
 
+        self.wid("key_type_grid").hide()
+        
         if name == ScanDevice.DEFAULT_NAME:
             self.pointer_selected = True
             self.wid("device_detach").set_sensitive(False)
@@ -1486,6 +1751,8 @@ class ScannerDialog(DialogBuilder):
                 if device and name == device.get_config_string():
                     self.pointer_selected = device.is_pointer()
                     self.wid("device_detach").set_sensitive(True)
+                    if config.scanner.mode == 2:#stepscan
+                        self.wid("key_type_grid").show()
                     combo.set_active_iter(it)
                     break
                 it = model.iter_next(it)
@@ -1506,10 +1773,16 @@ class ScannerDialog(DialogBuilder):
         if device:
             config.scanner.device_name = device.get_config_string()
             self.wid("device_detach").set_sensitive(True)
+            if config.scanner.mode == 2:#stepscan
+                config.scanner.key_type = "single_key"
+                self.wid(config.scanner.key_type).set_active(True)
+                self.wid("key_type_grid").show()
+                """The below line exists here to resest when mode is changed; and not when @ regular start-up once you had set i.e. in case of same if-else in above function"""
             self.pointer_selected = device.is_pointer()
         else:
             config.scanner.device_name = ScanDevice.DEFAULT_NAME
             self.wid("device_detach").set_sensitive(False)
+            self.wid("key_type_grid").hide()
             self.pointer_selected = True
 
         if self.mapping_renderer:
@@ -1566,6 +1839,10 @@ class ScannerDialog(DialogBuilder):
         view.expand_all()
 
     def on_mapping_edited(self, cell, path, value, pointer_mode):
+        if path == "multiple":#for radio button mapping to work
+        	path = "0:0"
+        	pass
+        
         model = self.wid("device_mapping_model")
         it = model.get_iter_from_string(path)
         if it is None:
@@ -1589,6 +1866,9 @@ class ScannerDialog(DialogBuilder):
 
         model.set(it, col, value)
 
+        if config.scanner.mode == 2 and config.scanner.key_type == "multiple_key":
+            model.set(it, col, 0)
+
         if dup_val in dev_map:
             del dev_map[dup_val]
 
@@ -1606,6 +1886,16 @@ class ScannerDialog(DialogBuilder):
             config.scanner.device_key_map = dev_map
 
     def on_mapping_cleared(self, cell, path, pointer_mode):
+        """ In: radio button """
+        if path == "clear":
+            if len(config.scanner.device_key_map) > 0:
+                config.scanner.device_key_map = {}
+                model = self.wid("device_mapping_model")
+                model.set(model.get_iter_from_string("0:0"), self.COL_KEY, 0)
+                model.set(model.get_iter_from_string("0:1"), self.COL_KEY, 0)
+            return
+        """ In: radio button """
+        
         model = self.wid("device_mapping_model")
         it = model.get_iter_from_string(path)
         if it is None:
@@ -1639,6 +1929,13 @@ class ScannerDialog(DialogBuilder):
         for k, v in dev_map.items():
             if v == action:
                 return k
+
+    """ In: radio button """
+    def _update_2_scan_ui(self):
+        if config.scanner.key_type == "multiple_key" and config.scanner.mode == 2:#only for stepscan
+            self.wid("scrolledwindow1").set_sensitive(False)
+        else: #config.scanner.key_type == "single_key"
+            self.wid("scrolledwindow1").set_sensitive(True)
 
 
 MAX_GINT32 = (1 << 31) - 1
@@ -1714,6 +2011,9 @@ class CellRendererMapping(Gtk.CellRendererText):
                 text = "{} {!s}".format(_("Button"), self.button)
             else:
                 text = Gdk.keyval_name(self.key)
+
+        if config.scanner.mode == 2 and config.scanner.key_type == "multiple_key":
+            text = _("Disabled")
 
         self.set_property("text", text)
 
