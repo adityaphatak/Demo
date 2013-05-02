@@ -375,7 +375,7 @@ class Keyboard(WordSuggestions):
             mod_mask = keymap.get_modifier_state()
             self.set_modifiers(mod_mask)
 
-        self.update_scanner()
+        self.update_scanner_enabled()
 
         self.invalidate_ui()
         self.commit_ui_updates()
@@ -412,23 +412,13 @@ class Keyboard(WordSuggestions):
                 if type:
                     self.button_controllers[key] = type(self, key)
 
-    def update_scanner(self):
+    def update_scanner_enabled(self):
         """ Enable keyboard scanning if it is enabled in gsettings. """
         self.update_input_event_source()
         self.enable_scanner(config.scanner.enabled)
 
     def enable_scanner(self, enable):
         """ Enable keyboard scanning. """
-        
-        # if both scanner and lable popup enable then disable flash feedback of keys,         
-         #its default for only show lable popup 
-        
-        if (config.scanner.scan_feedback_enabled and config.scanner.enabled): #In
-            config.scanner.feedback_flash = False #In
-            
-        else:
-            config.scanner.feedback_flash = True #In
-            
         if enable:
             if not self.scanner:
                 self.scanner = Scanner(self._on_scanner_redraw,
@@ -444,7 +434,7 @@ class Keyboard(WordSuggestions):
 
     def _on_scanner_enabled(self, enabled):
         """ Config callback for scanner.enabled changes. """
-        self.update_scanner()
+        self.update_scanner_enabled()
         self.update_transparency()
 
     def _on_scanner_redraw(self, keys):
@@ -581,24 +571,16 @@ class Keyboard(WordSuggestions):
                                    action
 
             # Draw key unpressed to remove the visual feedback.
-            
-            # For Inputability
-            # if both scanner and lable popup enable for Inputablity popup otherwise work normally
-          
-            if (config.scanner.scan_feedback_enabled and  config.scanner.enabled):#In
-                
+            if extend_pressed_state and \
+               not config.scanner.enabled:
+                # Keep key pressed for a little longer for clear user feedback.
                 self._unpress_timers.start(key)
             else:
-                if extend_pressed_state and \
-                    not config.scanner.enabled:
-                # Keep key pressed for a little longer for clear user feedback.
-                    self._unpress_timers.start(key)
-                else:
                 # Unpress now to avoid flickering of the
                 # pressed color after key release.
-                    key.pressed = False
-                    self.on_key_unpressed(key)
-            
+                key.pressed = False
+                self.on_key_unpressed(key)
+
             # no more actions left to finish
             key.activated = False
 
@@ -637,8 +619,9 @@ class Keyboard(WordSuggestions):
                     controller.long_press(view, button)
 
             elif key.is_prediction_key():
-                view.show_language_menu(key, button)
-                long_pressed = True
+                pass
+                #view.show_language_menu(key, button)
+                #long_pressed = True
 
             else:
                 # All other keys get hard-coded long press menus
@@ -874,7 +857,7 @@ class Keyboard(WordSuggestions):
             # Don't allow to open multiple dialogs in force-to-top mode.
             elif not config.xid_mode and \
                 not self.editing_snippet:
-                view.edit_snippet(snippet_id)
+                view.show_snippets_dialog(snippet_id)
                 self.editing_snippet = True
 
         elif key_type == KeyCommon.SCRIPT_TYPE:
@@ -919,6 +902,9 @@ class Keyboard(WordSuggestions):
         return needs_layout_update
 
     def maybe_switch_to_first_layer(self, key):
+        """
+        Activate the first layer if key allows it.
+        """
         if self.active_layer_index != 0 and \
            not self._layer_locked and \
            not self.editing_snippet:
@@ -931,14 +917,15 @@ class Keyboard(WordSuggestions):
 
             if unlatch:
                 self.active_layer_index = 0
-                self.update_visible_layers()
-                self.redraw()
+                self.invalidate_visible_layers()
+                self.invalidate_canvas()
+                self.commit_ui_updates()
 
             return unlatch
 
     def set_modifiers(self, mod_mask):
         """
-        Sync Onboard with modifiers from the given modifier mask.
+        Sync Onboard with modifiers of the given modifier mask.
         Used to sync changes to system modifier state with Onboard.
         """
         for mod_bit in (1<<bit for bit in range(8)):
@@ -1176,7 +1163,9 @@ class Keyboard(WordSuggestions):
             else:
                 label = key.get_label()
                 alternatives = self.find_canonical_equivalents(label)
-                if len(label) == 1 and label.isalnum() or bool(alternatives):
+                if (len(label) == 1 and label.isalnum()) or \
+                   key.id == "SPCE" or \
+                   bool(alternatives):
                     action = config.keyboard.default_key_action
                 else:
                     action = KeyCommon.SINGLE_STROKE_ACTION
@@ -1269,7 +1258,13 @@ class Keyboard(WordSuggestions):
         """
         self._invalidated_ui |= UIMask.LAYOUT
 
-    def invalidate_redraw(self):
+    def invalidate_visible_layers(self):
+        """
+        Update the layout tree when the active layer changed.
+        """
+        self._invalidated_ui |= UIMask.LAYERS
+
+    def invalidate_canvas(self):
         """ Just redraw everything """
         self._invalidated_ui |= UIMask.REDRAW
 
@@ -1286,11 +1281,14 @@ class Keyboard(WordSuggestions):
         if mask & UIMask.SUGGESTIONS:
             keys.update(WordSuggestions.update_suggestions_ui(self))
 
+        if mask & UIMask.LAYERS:
+            self.update_visible_layers()
+
         if mask & UIMask.LAYOUT:
             self.update_layout()   # after suggestions!
 
-        if mask & UIMask.LAYERS:
-            self.update_visible_layers()
+        if mask & (UIMask.SUGGESTIONS | UIMask.LAYERS):
+            self.update_scanner()
 
         for view in self._layout_views:
             view.apply_ui_updates(mask)
@@ -1317,10 +1315,13 @@ class Keyboard(WordSuggestions):
             if layers:
                 layout.set_visible_layers([layers[0], self.active_layer])
 
+    def update_scanner(self):
+        """ tell scanner to update on layout changes """
         # notify the scanner about layer changes
         if self.scanner:
+            layout = self.layout
             if layout:
-                self.scanner.update_layer(layout, self.active_layer)
+                self.scanner.update_layer(layout, self.active_layer)#IN
             else:
                 _logger.warning("Failed to update scanner. No layout.")
 
@@ -1345,11 +1346,6 @@ class Keyboard(WordSuggestions):
                sequence.event_type != EventType.DWELL and \
                key.can_show_label_popup() and \
                allowed:
-                #pdb.set_trace()
-                self._touch_feedback.show(key, view)
-        else: # for Inputability Scanner Popup get view for show()
-            if not config.scanner.feedback_flash:
-                view=self._layout_views[0]
                 self._touch_feedback.show(key, view)
 
     def on_key_unpressed(self, key):
@@ -1685,8 +1681,8 @@ class BCLayer(ButtonController):
                                       if self.layer_index else False
 
         if active_before != active:
-            keyboard.update_visible_layers()
-            keyboard.redraw()
+            keyboard.invalidate_visible_layers()
+            keyboard.invalidate_canvas()
 
     def update(self):
         # don't show active state for layer 0, it'd be visible all the time
