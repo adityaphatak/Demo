@@ -8,4 +8,4 @@ def run():
     import subprocess
     process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
 
-
+gnome-session-quit --power-off
